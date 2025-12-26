@@ -27,6 +27,8 @@ USER_STATES = {}
 MESSAGE_MAPPING: dict[int, int] = {}  # {group_message_id: user_chat_id}
 # Track last sent group message per user chat to allow deletion when a new message arrives
 LAST_GROUP_MESSAGE_BY_USER: dict[int, int] = {}  # {user_chat_id: group_message_id}
+# Track last bot message per chat (welcome/help menus) to replace them when updated
+LAST_BOT_MESSAGE_BY_CHAT: dict[int, int] = {}
 
 # Anonymous mode settings
 ANONYMOUS_MODE = True  # Set to False to show real usernames
@@ -79,17 +81,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # If it's a callback query, edit the message, otherwise send a new one
     if update.callback_query:
-        await update.callback_query.edit_message_text(
+        query = update.callback_query
+        await query.answer()
+        # delete the old message (if possible) to avoid showing stale text
+        try:
+            if query.message:
+                await query.message.delete()
+        except Exception:
+            pass
+        sent = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
             text=welcome_text,
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
+        try:
+            LAST_BOT_MESSAGE_BY_CHAT[update.effective_chat.id] = sent.message_id
+        except Exception:
+            pass
     else:
-        await update.message.reply_text(
+        # remove previous bot menu in this chat if exists
+        try:
+            prev = LAST_BOT_MESSAGE_BY_CHAT.get(update.effective_chat.id)
+            if prev:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=prev)
+        except Exception:
+            pass
+        sent = await update.message.reply_text(
             welcome_text,
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
+        try:
+            LAST_BOT_MESSAGE_BY_CHAT[update.effective_chat.id] = sent.message_id
+        except Exception:
+            pass
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
